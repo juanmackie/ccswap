@@ -1,0 +1,2 @@
+# ccswap
+A lightweight, cross-platform command-line tool for managing multiple Claude Code configuration profiles.It allows users to easily switch between different sets of configurations, such as API keys, endpoints, and model mappings, using simple commands like ccswap use <profile>. The tool is designed to be simple and efficient, with no external dependencies, and it works by managing different versions of the settings.json file used by Claude Code. Built with ❤️ by JUAN MACKIE

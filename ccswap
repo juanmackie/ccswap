@@ -1,0 +1,202 @@
+#!/bin/bash
+# ccswap – Claude-Code profile switcher for Unix/Linux/macOS
+# Make it executable: chmod +x ccswap
+# Move to PATH: sudo mv ccswap /usr/local/bin/
+
+set -e
+
+SCRIPT_NAME="ccswap"
+VERSION="1.0.0"
+PROFILES_DIR="$HOME/.claude/profiles"
+ACTIVE_PROFILE_FILE="$HOME/.claude/active_profile"
+SETTINGS_FILE="$HOME/.claude/settings.json"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Ensure profiles directory exists
+mkdir -p "$PROFILES_DIR"
+
+# Function to show usage
+usage() {
+    cat << EOF
+${BLUE}Claude Code Profile Swapper v${VERSION}${NC}
+
+Usage: $SCRIPT_NAME [COMMAND] [OPTIONS]
+
+Commands:
+  ls                    List all available profiles
+  use <profile>         Switch to specified profile
+  save <profile>         Save current settings as profile
+  rm <profile>          Delete a profile
+  help                  Show this help message
+  -v, --version         Show version information
+
+Examples:
+  $SCRIPT_NAME ls
+  $SCRIPT_NAME use work
+  $SCRIPT_NAME save personal
+  $SCRIPT_NAME rm old-profile
+
+EOF
+}
+
+# Function to show version
+version() {
+    echo "${SCRIPT_NAME} v${VERSION}"
+}
+
+# Function to list profiles
+list_profiles() {
+    echo -e "${BLUE}Available profiles:${NC}"
+    
+    if [ ! -d "$PROFILES_DIR" ] || [ -z "$(ls -A "$PROFILES_DIR" 2>/dev/null)" ]; then
+        echo "No profiles found. Create one with: $SCRIPT_NAME save <profile_name>"
+        return
+    fi
+    
+    local current_profile=""
+    if [ -f "$ACTIVE_PROFILE_FILE" ]; then
+        current_profile=$(cat "$ACTIVE_PROFILE_FILE")
+    fi
+    
+    for profile in "$PROFILES_DIR"/*.json; do
+        if [ -f "$profile" ]; then
+            local profile_name=$(basename "$profile" .json)
+            if [ "$profile_name" = "$current_profile" ]; then
+                echo -e "  ${GREEN}* ${profile_name}${NC} (active)"
+            else
+                echo -e "  ${YELLOW}  ${profile_name}${NC}"
+            fi
+        fi
+    done
+}
+
+# Function to switch profile
+use_profile() {
+    local profile_name="$1"
+    
+    if [ -z "$profile_name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        usage
+        return 1
+    fi
+    
+    local profile_file="$PROFILES_DIR/${profile_name}.json"
+    
+    if [ ! -f "$profile_file" ]; then
+        echo -e "${RED}Error: Profile '${profile_name}' not found${NC}"
+        echo "Available profiles:"
+        list_profiles
+        return 1
+    fi
+    
+    # Backup current settings if they exist
+    if [ -f "$SETTINGS_FILE" ]; then
+        local backup_file="$PROFILES_DIR/_backup_$(date +%Y%m%d_%H%M%S).json"
+        cp "$SETTINGS_FILE" "$backup_file"
+        echo -e "${YELLOW}Backed up current settings to: $(basename "$backup_file")${NC}"
+    fi
+    
+    # Copy profile to active settings
+    cp "$profile_file" "$SETTINGS_FILE"
+    echo "$profile_name" > "$ACTIVE_PROFILE_FILE"
+    
+    echo -e "${GREEN}Successfully switched to profile: ${profile_name}${NC}"
+}
+
+# Function to save current settings as profile
+save_profile() {
+    local profile_name="$1"
+    
+    if [ -z "$profile_name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        usage
+        return 1
+    fi
+    
+    local profile_file="$PROFILES_DIR/${profile_name}.json"
+    
+    if [ ! -f "$SETTINGS_FILE" ]; then
+        echo -e "${RED}Error: No current settings found to save${NC}"
+        echo "Make sure Claude Code has been run at least once to create settings.json"
+        return 1
+    fi
+    
+    cp "$SETTINGS_FILE" "$profile_file"
+    echo -e "${GREEN}Saved current settings to profile: ${profile_name}${NC}"
+    echo "**PATH TO NEWLY CREATED PROFILE**: $profile_file"
+}
+
+# Function to delete profile
+delete_profile() {
+    local profile_name="$1"
+    
+    if [ -z "$profile_name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        usage
+        return 1
+    fi
+    
+    local profile_file="$PROFILES_DIR/${profile_name}.json"
+    
+    if [ ! -f "$profile_file" ]; then
+        echo -e "${RED}Error: Profile '${profile_name}' not found${NC}"
+        return 1
+    fi
+    
+    # Check if it's active profile
+    if [ -f "$ACTIVE_PROFILE_FILE" ] && [ "$(cat "$ACTIVE_PROFILE_FILE")" = "$profile_name" ]; then
+        echo -e "${YELLOW}Warning: '${profile_name}' is currently active${NC}"
+        read -p "Delete anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            return 1
+        fi
+        
+        # Remove active profile file
+        rm -f "$ACTIVE_PROFILE_FILE"
+    fi
+    
+    rm -f "$profile_file"
+    echo -e "${GREEN}Deleted profile: ${profile_name}${NC}"
+}
+
+# Main function
+main() {
+    case "${1:-}" in
+        ls)
+            list_profiles
+            ;;
+        use)
+            use_profile "$2"
+            ;;
+        save)
+            save_profile "$2"
+            ;;
+        rm)
+            delete_profile "$2"
+            ;;
+        help|--help|-h)
+            usage
+            ;;
+        --version|-v)
+            version
+            ;;
+        "")
+            usage
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown command '${1}'${NC}"
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+# Run main function
+main "$@"
