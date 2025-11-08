@@ -81,9 +81,9 @@ You should see the usage information if installed correctly.
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4.6"
   }
 }
+```
 
 ## File Structure After Installation
-```
 
 ```
 # Windows
