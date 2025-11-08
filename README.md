@@ -69,7 +69,21 @@ You should see the usage information if installed correctly.
 2. Save your first profile: `ccswap save default`
 3. Create additional profiles as needed
 
+## Example profile for GLM 4.6
+```
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "REDACTED-INSERT YOUR KEY",
+    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+    "API_TIMEOUT_MS": "3000000",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.6",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4.6"
+  }
+}
+
 ## File Structure After Installation
+```
 
 ```
 # Windows
