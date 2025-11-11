@@ -82,7 +82,19 @@ You should see the usage information if installed correctly.
   }
 }
 ```
-
+## Example profile for Kimi K2-thinking
+```
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "REDACTED-INSERT YOUR KEY",
+    "ANTHROPIC_BASE_URL": "https://api.moonshot.ai/anthropic",
+    "API_TIMEOUT_MS": "3000000",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k2-thinking",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k2-thinking",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k2-thinking"
+  }
+}
+```
 ## File Structure After Installation
 
 ```
