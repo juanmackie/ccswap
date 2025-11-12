@@ -95,9 +95,23 @@ You should see the usage information if installed correctly.
   }
 }
 ```
+## Example profile for MiniMax M2
+```
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "REDACTED-INSERT YOUR KEY",
+    "ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic",
+    "API_TIMEOUT_MS": "3000000",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMax-M2",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "MiniMax-M2",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "MiniMax-M2"
+  }
+}
+```
+
 ## File Structure After Installation
 
-```
+ 
 # Windows
 %USERPROFILE%\.claude\
 ├── settings.json          # Active Claude Code config
