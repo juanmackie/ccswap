@@ -6,10 +6,14 @@
 set -e
 
 SCRIPT_NAME="ccswap"
-VERSION="1.0.0"
+VERSION="2.0.0"
 PROFILES_DIR="$HOME/.claude/profiles"
 ACTIVE_PROFILE_FILE="$HOME/.claude/active_profile"
 SETTINGS_FILE="$HOME/.claude/settings.json"
+
+# Source OAuth helper functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OAUTH_HELPER="$SCRIPT_DIR/ccswap_oauth.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,8 +35,11 @@ Usage: $SCRIPT_NAME [COMMAND] [OPTIONS]
 Commands:
   ls                    List all available profiles
   use <profile>         Switch to specified profile
-  save <profile>         Save current settings as profile
+  save <profile>        Save current settings as profile
   rm <profile>          Delete a profile
+  oauth login <profile> Authenticate profile with OAuth2
+  oauth status <profile> Show OAuth2 token status
+  oauth logout <profile> Remove OAuth2 credentials
   help                  Show this help message
   -v, --version         Show version information
 
@@ -41,6 +48,7 @@ Examples:
   $SCRIPT_NAME use work
   $SCRIPT_NAME save personal
   $SCRIPT_NAME rm old-profile
+  $SCRIPT_NAME oauth login work
 
 EOF
 }
@@ -53,24 +61,35 @@ version() {
 # Function to list profiles
 list_profiles() {
     echo -e "${BLUE}Available profiles:${NC}"
-    
+
     if [ ! -d "$PROFILES_DIR" ] || [ -z "$(ls -A "$PROFILES_DIR" 2>/dev/null)" ]; then
         echo "No profiles found. Create one with: $SCRIPT_NAME save <profile_name>"
         return
     fi
-    
+
     local current_profile=""
     if [ -f "$ACTIVE_PROFILE_FILE" ]; then
         current_profile=$(cat "$ACTIVE_PROFILE_FILE")
     fi
-    
+
     for profile in "$PROFILES_DIR"/*.json; do
         if [ -f "$profile" ]; then
             local profile_name=$(basename "$profile" .json)
+            local indicator=""
+
+            # Check if OAuth2 profile
+            if [ -f "$OAUTH_HELPER" ]; then
+                source "$OAUTH_HELPER" 2>/dev/null || true
+                local auth_type=$(detect_auth_type "$profile" 2>/dev/null || echo "apikey")
+                if [ "$auth_type" = "oauth2" ]; then
+                    indicator=" ${BLUE}[OAuth2]${NC}"
+                fi
+            fi
+
             if [ "$profile_name" = "$current_profile" ]; then
-                echo -e "  ${GREEN}* ${profile_name}${NC} (active)"
+                echo -e "  ${GREEN}* ${profile_name}${indicator}${NC} (active)"
             else
-                echo -e "  ${YELLOW}  ${profile_name}${NC}"
+                echo -e "  ${YELLOW}  ${profile_name}${indicator}${NC}"
             fi
         fi
     done
@@ -79,55 +98,143 @@ list_profiles() {
 # Function to switch profile
 use_profile() {
     local profile_name="$1"
-    
+
     if [ -z "$profile_name" ]; then
         echo -e "${RED}Error: Profile name required${NC}"
         usage
         return 1
     fi
-    
+
     local profile_file="$PROFILES_DIR/${profile_name}.json"
-    
+
     if [ ! -f "$profile_file" ]; then
         echo -e "${RED}Error: Profile '${profile_name}' not found${NC}"
         echo "Available profiles:"
         list_profiles
         return 1
     fi
-    
+
     # Backup current settings if they exist
     if [ -f "$SETTINGS_FILE" ]; then
         local backup_file="$PROFILES_DIR/_backup_$(date +%Y%m%d_%H%M%S).json"
         cp "$SETTINGS_FILE" "$backup_file"
         echo -e "${YELLOW}Backed up current settings to: $(basename "$backup_file")${NC}"
     fi
-    
-    # Copy profile to active settings
+
+    # Check if OAuth2 profile
+    local auth_type="apikey"
+    local token_file="$PROFILES_DIR/${profile_name}_tokens.enc"
+
+    if [ -f "$OAUTH_HELPER" ]; then
+        source "$OAUTH_HELPER"
+        auth_type=$(detect_auth_type "$profile_file" 2>/dev/null || echo "apikey")
+    fi
+
+    if [ "$auth_type" = "oauth2" ]; then
+        echo -e "${CYAN}Profile '${profile_name}' uses OAuth2 authentication${NC}"
+
+        if [ ! -f "$token_file" ]; then
+            echo -e "${RED}Error: No OAuth tokens found${NC}"
+            echo -e "Run '${YELLOW}ccswap oauth login ${profile_name}${NC}' to authenticate"
+            return 1
+        fi
+
+        # Prompt for password
+        read -s -p "Enter password for OAuth tokens: " password
+        echo ""
+
+        # Decrypt tokens
+        local temp_tokens=$(mktemp)
+        if ! decrypt_tokens "$token_file" "$temp_tokens" "$password" 2>/dev/null; then
+            echo -e "${RED}Error: Failed to decrypt tokens (wrong password?)${NC}"
+            rm -f "$temp_tokens"
+            return 1
+        fi
+
+        # Check if token needs refresh
+        if oauth_token_needs_refresh "$temp_tokens"; then
+            echo -e "${YELLOW}Access token expired or expiring soon, refreshing...${NC}"
+
+            if oauth_token_refresh "$profile_file" "$temp_tokens" "$password"; then
+                # Re-encrypt after refresh
+                encrypt_tokens "$temp_tokens" "$token_file" "$password"
+                echo -e "${GREEN}Token refreshed successfully${NC}"
+            else
+                echo -e "${RED}Error: Token refresh failed${NC}"
+                echo -e "Run '${YELLOW}ccswap oauth login ${profile_name}${NC}' to re-authenticate"
+                rm -f "$temp_tokens"
+                return 1
+            fi
+        fi
+
+        # Extract access token
+        local access_token=$(jq -r '.access_token' "$temp_tokens" 2>/dev/null)
+        rm -f "$temp_tokens"
+
+        if [ -z "$access_token" ]; then
+            echo -e "${RED}Error: Invalid token file${NC}"
+            return 1
+        fi
+
+        # Create temp settings with access token
+        local temp_settings=$(mktemp)
+        jq --arg token "$access_token" '.env.ANTHROPIC_AUTH_TOKEN = $token' "$profile_file" > "$temp_settings"
+
+        # Copy to settings
+        cp "$temp_settings" "$SETTINGS_FILE"
+        rm -f "$temp_settings"
+
+        echo "$profile_name" > "$ACTIVE_PROFILE_FILE"
+        echo -e "${GREEN}Successfully switched to OAuth2 profile: ${profile_name}${NC}"
+        return 0
+    fi
+
+    # API key profile (original behavior)
     cp "$profile_file" "$SETTINGS_FILE"
     echo "$profile_name" > "$ACTIVE_PROFILE_FILE"
-    
+
     echo -e "${GREEN}Successfully switched to profile: ${profile_name}${NC}"
 }
 
 # Function to save current settings as profile
 save_profile() {
     local profile_name="$1"
-    
+
     if [ -z "$profile_name" ]; then
         echo -e "${RED}Error: Profile name required${NC}"
         usage
         return 1
     fi
-    
+
     local profile_file="$PROFILES_DIR/${profile_name}.json"
-    
+
     if [ ! -f "$SETTINGS_FILE" ]; then
         echo -e "${RED}Error: No current settings found to save${NC}"
         echo "Make sure Claude Code has been run at least once to create settings.json"
         return 1
     fi
-    
+
+    # Copy settings to profile
     cp "$SETTINGS_FILE" "$profile_file"
+
+    # If current profile is OAuth2, copy token file if it exists
+    if [ -f "$ACTIVE_PROFILE_FILE" ]; then
+        local active_profile=$(cat "$ACTIVE_PROFILE_FILE")
+        local active_profile_file="$PROFILES_DIR/${active_profile}.json"
+        local active_tokens="$PROFILES_DIR/${active_profile}_tokens.enc"
+
+        if [ -f "$OAUTH_HELPER" ]; then
+            source "$OAUTH_HELPER"
+            local auth_type=$(detect_auth_type "$active_profile_file" 2>/dev/null || echo "apikey")
+
+            if [ "$auth_type" = "oauth2" ] && [ -f "$active_tokens" ]; then
+                local new_tokens="$PROFILES_DIR/${profile_name}_tokens.enc"
+                cp "$active_tokens" "$new_tokens"
+                echo -e "${CYAN}Note: OAuth2 credentials copied to new profile${NC}"
+            fi
+        fi
+    fi
+
     echo -e "${GREEN}Saved current settings to profile: ${profile_name}${NC}"
     echo "**PATH TO NEWLY CREATED PROFILE**: $profile_file"
 }
@@ -135,20 +242,21 @@ save_profile() {
 # Function to delete profile
 delete_profile() {
     local profile_name="$1"
-    
+
     if [ -z "$profile_name" ]; then
         echo -e "${RED}Error: Profile name required${NC}"
         usage
         return 1
     fi
-    
+
     local profile_file="$PROFILES_DIR/${profile_name}.json"
-    
+    local token_file="$PROFILES_DIR/${profile_name}_tokens.enc"
+
     if [ ! -f "$profile_file" ]; then
         echo -e "${RED}Error: Profile '${profile_name}' not found${NC}"
         return 1
     fi
-    
+
     # Check if it's active profile
     if [ -f "$ACTIVE_PROFILE_FILE" ] && [ "$(cat "$ACTIVE_PROFILE_FILE")" = "$profile_name" ]; then
         echo -e "${YELLOW}Warning: '${profile_name}' is currently active${NC}"
@@ -157,13 +265,146 @@ delete_profile() {
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             return 1
         fi
-        
+
         # Remove active profile file
         rm -f "$ACTIVE_PROFILE_FILE"
     fi
-    
+
     rm -f "$profile_file"
+
+    # Also delete token file if exists
+    if [ -f "$token_file" ]; then
+        rm -f "$token_file"
+        echo -e "${CYAN}OAuth2 tokens also deleted${NC}"
+    fi
+
     echo -e "${GREEN}Deleted profile: ${profile_name}${NC}"
+}
+
+# OAuth2 command functions
+oauth_login() {
+    local profile_name="$1"
+
+    if [ -z "$profile_name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        echo "Usage: $SCRIPT_NAME oauth login <profile>"
+        return 1
+    fi
+
+    local profile_file="$PROFILES_DIR/${profile_name}.json"
+
+    if [ ! -f "$profile_file" ]; then
+        echo -e "${RED}Error: Profile '${profile_name}' not found${NC}"
+        return 1
+    fi
+
+    # Check dependencies
+    if [ -f "$OAUTH_HELPER" ]; then
+        source "$OAUTH_HELPER"
+        if ! check_dependencies; then
+            return 1
+        fi
+    else
+        echo -e "${RED}Error: OAuth helper not found at $OAUTH_HELPER${NC}"
+        return 1
+    fi
+
+    # Check if OAuth2 profile
+    local auth_type=$(detect_auth_type "$profile_file" 2>/dev/null || echo "apikey")
+    if [ "$auth_type" != "oauth2" ]; then
+        echo -e "${RED}Error: Profile '${profile_name}' is not an OAuth2 profile${NC}"
+        echo "Add 'auth_type': 'oauth2' to the profile JSON to use OAuth2"
+        return 1
+    fi
+
+    # Get encryption password
+    read -s -p "Enter encryption password for OAuth tokens: " password1
+    echo ""
+    read -s -p "Confirm password: " password2
+    echo ""
+
+    if [ "$password1" != "$password2" ]; then
+        echo -e "${RED}Error: Passwords do not match${NC}"
+        return 1
+    fi
+
+    if [ -z "$password1" ]; then
+        echo -e "${RED}Error: Password cannot be empty${NC}"
+        return 1
+    fi
+
+    # Execute OAuth login flow
+    oauth_device_code_login "$profile_file" "$password1" "$profile_name"
+}
+
+oauth_status() {
+    local profile_name="$1"
+
+    if [ -z "$profile_name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        echo "Usage: $SCRIPT_NAME oauth status <profile>"
+        return 1
+    fi
+
+    local token_file="$PROFILES_DIR/${profile_name}_tokens.enc"
+
+    if [ ! -f "$token_file" ]; then
+        echo -e "${YELLOW}No OAuth tokens found for profile '${profile_name}'${NC}"
+        echo "Run 'ccswap oauth login ${profile_name}' to authenticate"
+        return 1
+    fi
+
+    # Get password
+    read -s -p "Enter password to decrypt OAuth tokens: " password
+    echo ""
+
+    # Decrypt and display status
+    if [ -f "$OAUTH_HELPER" ]; then
+        source "$OAUTH_HELPER"
+
+        local temp_tokens=$(mktemp)
+        if decrypt_tokens "$token_file" "$temp_tokens" "$password" 2>/dev/null; then
+            oauth_display_status "$temp_tokens"
+            rm -f "$temp_tokens"
+            return 0
+        else
+            rm -f "$temp_tokens"
+            echo -e "${RED}Error: Failed to decrypt tokens (wrong password?)${NC}"
+            return 1
+        fi
+    else
+        echo -e "${RED}Error: OAuth helper not found${NC}"
+        return 1
+    fi
+}
+
+oauth_logout() {
+    local profile_name="$1"
+
+    if [ -z "$profile_name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        echo "Usage: $SCRIPT_NAME oauth logout <profile>"
+        return 1
+    fi
+
+    local token_file="$PROFILES_DIR/${profile_name}_tokens.enc"
+
+    if [ ! -f "$token_file" ]; then
+        echo -e "${YELLOW}No OAuth tokens found for profile '${profile_name}'${NC}"
+        return 0
+    fi
+
+    read -p "Delete OAuth tokens for '${profile_name}'? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -f "$token_file"
+        echo -e "${GREEN}OAuth tokens deleted for profile '${profile_name}'${NC}"
+        echo "The profile itself remains and can be re-authenticated"
+    else
+        echo "Cancelled"
+    fi
+
+    return 0
 }
 
 # Main function
@@ -180,6 +421,28 @@ main() {
             ;;
         rm)
             delete_profile "$2"
+            ;;
+        oauth)
+            case "${2:-}" in
+                login)
+                    oauth_login "$3"
+                    ;;
+                status)
+                    oauth_status "$3"
+                    ;;
+                logout)
+                    oauth_logout "$3"
+                    ;;
+                *)
+                    echo "Usage: $SCRIPT_NAME oauth <login|status|logout> <profile>"
+                    echo ""
+                    echo "Commands:"
+                    echo "  login    Authenticate profile with OAuth2"
+                    echo "  status   Show OAuth2 token status"
+                    echo "  logout   Remove OAuth2 credentials"
+                    exit 1
+                    ;;
+            esac
             ;;
         help|--help|-h)
             usage
