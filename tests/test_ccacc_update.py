@@ -19,7 +19,7 @@ CCACC = ROOT / "ccacc"
 SOURCE = CCACC.read_text().rsplit('main "$@"', 1)[0]
 LATEST_URL = "https://api.github.com/repos/geminiwen/ccacc/releases/latest"
 INSTALLER_URL = "https://raw.githubusercontent.com/geminiwen/ccacc/main/install.sh"
-HINT = "ccacc 1.8.0 is available (you have 1.2.5); run 'ccacc update'\n"
+HINT = "ccacc 1.8.0 is available (you have 1.2.6); run 'ccacc update'\n"
 
 # Any other URL fails, so a fixture can never reach a real host.
 CURL = r'''#!/bin/bash
@@ -134,7 +134,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_version_compare_is_numeric_per_component(self):
         cases = [("1.10.0", "1.9.9", True), ("1.1.0", "1.1.0", False), ("1.0.9", "1.1.0", False),
-                 ("2.0.0", "10.0.0", False), ("10.0.0", "9.99.99", True), ("1.2.50", "1.2.9", True),
+                 ("2.0.0", "10.0.0", False), ("10.0.0", "9.99.99", True), ("1.2.60", "1.2.9", True),
                  ("01.2.3", "1.2.2", True), ("1.02.0", "1.2.0", False),
                  ("99999999999999999999.0.0", "99999999999999999998.0.0", True),
                  ("1.2", "1.1.0", False), ("v1.2.0", "1.1.0", False), ("1.2.0-rc1", "1.1.0", False),
@@ -212,12 +212,12 @@ class UpdateTests(unittest.TestCase):
         self.wait_for_cache("1.8.0")
 
     def test_refresh_skipped_when_cache_is_fresh(self):
-        self.write_cache("1.2.5", age=23 * 3600)
+        self.write_cache("1.2.6", age=23 * 3600)
         result = self.run_ccacc("current")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
         self.assert_no_refresh()
-        self.assertEqual(self.read_cache()["latest"], "1.2.5")
+        self.assertEqual(self.read_cache()["latest"], "1.2.6")
 
     def test_stale_or_future_cache_is_refreshed_and_hint_uses_cached_value(self):
         for age in (25 * 3600, -3 * 86400):
@@ -302,7 +302,7 @@ class UpdateTests(unittest.TestCase):
                 self.assertEqual((result.stdout, result.stderr), ("status 7\n", ""))
 
     def test_use_starts_the_refresh_before_the_command(self):
-        self.write_cache("1.2.5", age=2 * 86400)
+        self.write_cache("1.2.6", age=2 * 86400)
         result = self.bash('use_command() { return 1; }\nmain use')
         self.assertEqual((result.returncode, result.stderr), (1, ""))
         self.wait_for_cache("1.8.0")
@@ -320,7 +320,7 @@ class UpdateTests(unittest.TestCase):
         # A source override in the environment would install something else.
         self.assertEqual(self.installer_env.read_text(), "unset\nunset\n")
         self.assertEqual(self.urls(), [LATEST_URL, INSTALLER_URL])
-        self.assertIn("Updating ccacc 1.2.5 to 1.8.0 in " + str(self.install_dir), result.stdout)
+        self.assertIn("Updating ccacc 1.2.6 to 1.8.0 in " + str(self.install_dir), result.stdout)
         self.assertIn("fake installer ran", result.stdout)
         self.assertEqual(self.read_cache()["latest"], "1.8.0")
         self.assertEqual(list(self.fixture.glob("ccacc-update.*")), [])
@@ -331,7 +331,7 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.installer_args(), ["--prefix", str(self.install_dir)])
 
     def test_update_refuses_same_or_older_version_without_force(self):
-        for tag, message in (("v1.2.5", "already the latest release"), ("v1.0.0", "newer than the latest release")):
+        for tag, message in (("v1.2.6", "already the latest release"), ("v1.0.0", "newer than the latest release")):
             with self.subTest(tag=tag):
                 self.calls.unlink(missing_ok=True)
                 self.env["RELEASE_RESPONSE"] = json.dumps({"tag_name": tag})
@@ -343,7 +343,7 @@ class UpdateTests(unittest.TestCase):
                 self.assertFalse(self.installer_log.exists())
 
     def test_update_force_reinstalls_same_version(self):
-        self.env["RELEASE_RESPONSE"] = json.dumps({"tag_name": "v1.2.5"})
+        self.env["RELEASE_RESPONSE"] = json.dumps({"tag_name": "v1.2.6"})
         result = self.run_ccacc("update", "--force")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.installer_args(), ["--prefix", str(self.install_dir)])
@@ -366,7 +366,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_help_lists_update(self):
         self.assertIn("update", self.run_ccacc("help").stdout)
-        self.assertEqual(self.run_ccacc("-v").stdout, "ccacc v1.2.5\n")
+        self.assertEqual(self.run_ccacc("-v").stdout, "ccacc v1.2.6\n")
 
 
 if __name__ == "__main__":

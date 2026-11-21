@@ -13,7 +13,7 @@
 set -e
 
 SCRIPT_NAME="ccacc"
-VERSION="1.2.5"
+VERSION="1.2.6"
 # The canonical installer always comes from main; it installs the latest GitHub Release.
 INSTALLER_URL="https://raw.githubusercontent.com/geminiwen/ccacc/main/install.sh"
 INSTALL_COMMAND="curl -fsSL $INSTALLER_URL | bash"
