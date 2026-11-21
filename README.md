@@ -223,8 +223,9 @@ boolean, `use` fails with an error naming the file and changes nothing.
 `save`, `new` and `use` read the live login's weekly limit reset time once, first
 thing (for `use`, the outgoing account's), from the same endpoint Claude Code's
 `/usage` reads, and record it as `~/.claude/accounts/<name>.weekly`. `list`, the
-`use` picker and `current` then show the next reset, rolled forward a week at a
-time, in the session's timezone, without going online again. A profile with no
+`use` picker and `current` then show how long until the next reset, rolled
+forward a week at a time and rounded down (`4d 7h`, `7h`, `35m`), without going
+online again; `current` adds the time itself in this computer's timezone. A profile with no
 recorded reset shows none. The lookup uses only an unexpired access token from the
 Keychain (never refreshes it) and passes it to `curl` on standard input; when it
 fails, an earlier record stays. Set `CCACC_NO_WEEKLY_RESET=1` to turn it off.
@@ -239,8 +240,7 @@ login, which Claude Code may have renewed since the last save; other profiles
 read their login backup. Only the timestamp is read; tokens are never shown or
 sent anywhere.
 
-`list` prints one line per profile under a header (the weekly reset there shows
-just the weekday and time: it is always within a week). When that table is wider
+`list` prints one line per profile under a header. When that table is wider
 than the terminal, each profile takes two lines instead: name, email and plan,
 then the weekly reset, login expiry and Surge policies underneath.
 

@@ -93,6 +93,19 @@ class WeeklyResetTests(unittest.TestCase):
         self.record("tokyo", f"{RESET}\n")
         self.assertEqual(self.bash('weekly_reset_label tokyo'), "Thu 03 Jan 11:00\n")
 
+    def test_time_left_is_rounded_down_to_days_hours_or_minutes(self):
+        # A little slack past each boundary keeps the clock's ticking out of it.
+        for seconds, expected in ((35 * 60 + 30, "35m"), (3600 + 30, "1h"), (7 * 3600 + 1800, "7h"),
+                                  (86400 + 30, "1d"), (4 * 86400 + 7 * 3600 + 1800, "4d 7h")):
+            self.record("tokyo", f"{int(time.time()) + seconds}\n")
+            self.assertEqual(self.bash('weekly_reset_in tokyo'), expected + "\n")
+        # A past reset rolls forward whole weeks, as for the label.
+        self.record("tokyo", f"{int(time.time()) - 300 * WEEK + 3 * 3600 + 1800}\n")
+        self.assertEqual(self.bash('weekly_reset_in tokyo'), "3h\n")
+        for value in ("", "soon\n"):
+            self.record("tokyo", value)
+            self.assertEqual(self.bash('weekly_reset_in tokyo'), "")
+
     def test_label_ignores_the_session_timezone(self):
         self.record("tokyo", f"{RESET}\n")
         env = dict(self.env, TZ="Australia/Sydney")
@@ -115,8 +128,8 @@ class WeeklyResetTests(unittest.TestCase):
             self.assertNotRegex(self.bash('list_accounts'), r"WEEKLY|\w{3} \d\d:\d\d")
             self.assertNotIn("Weekly", self.bash('show_current'))
         self.record("tokyo", f"{RESET}\n")
-        self.assertRegex(re.sub(r"\x1b\[[0-9;]*m", "", self.bash('list_accounts')), r"WEEKLY\n.*Thu 11:00")
-        self.assertIn("Weekly:     resets Thu 03 Jan 11:00", self.bash('show_current'))
+        self.assertRegex(re.sub(r"\x1b\[[0-9;]*m", "", self.bash('list_accounts')), r"WEEKLY\n.* \d+d( \d+h)?\n")
+        self.assertRegex(self.bash('show_current'), r"Weekly:     resets in \d+d( \d+h)? \(Thu 03 Jan 11:00\)\n")
         self.assertFalse(self.calls.exists())
 
 
@@ -178,20 +191,20 @@ class LoginExpiryTests(unittest.TestCase):
         self.save("tokyo", RESET * 1000)
         self.save("bare", None)
         (self.accounts / "tokyo.surge").write_text(json.dumps({"Claude": "JP1"}))
-        self.record("tokyo", f"{RESET}\n")
+        self.record("tokyo", f"{int(time.time()) + 4 * 86400 + 7 * 3600 + 1800}\n")
         terminal = "stdout_is_terminal() { :; }\nterminal_columns() { echo %d; }\n"
         wide = self.plain(self.bash(terminal % 200 + "list_accounts", credentials={}))
         self.assertEqual(wide.splitlines()[1:], [
-            "  NAME   EMAIL              WEEKLY     LOGIN   SURGE",
-            "  bare   bare@example.com   -          -       -",
-            "  tokyo  tokyo@example.com  Thu 11:00  03 Jan  Claude=JP1"])
+            "  NAME   EMAIL              WEEKLY  LOGIN   SURGE",
+            "  bare   bare@example.com   -       -       -",
+            "  tokyo  tokyo@example.com  4d 7h   03 Jan  Claude=JP1"])
         width = len(wide.splitlines()[3])
         self.assertEqual(self.plain(self.bash(terminal % width + "list_accounts", credentials={})), wide)
         narrow = self.plain(self.bash(terminal % (width - 1) + "list_accounts", credentials={}))
         self.assertEqual(narrow.splitlines()[1:], [
             "  bare   bare@example.com",
             "  tokyo  tokyo@example.com",
-            "         weekly Thu 11:00  ·  login 03 Jan  ·  Claude=JP1"])
+            "         weekly resets in 4d 7h  ·  login 03 Jan  ·  Claude=JP1"])
         # Output that is not a terminal stays on one line whatever the width.
         self.assertEqual(self.plain(self.bash("terminal_columns() { echo 10; }\nlist_accounts", credentials={})), wide)
 

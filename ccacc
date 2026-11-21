@@ -1290,8 +1290,8 @@ terminal_columns() {
 
 # Function to list saved accounts as an aligned table under a header. Columns
 # nobody has (plan, weekly reset, login expiry, Surge) are left out; a missing
-# value shows as '-'. The weekly reset is always within a week, so its weekday
-# suffices; the login expiry shows only the date, yellow with under 7 days left
+# value shows as '-'. The weekly reset shows how long until it comes round
+# (see weekly_reset_in); the login expiry shows only the date, yellow with under 7 days left
 # and red once expired. When the table is wider than the terminal, each account
 # takes two lines instead: name, email and plan, then the rest underneath.
 list_accounts() {
@@ -1305,7 +1305,7 @@ list_accounts() {
         names[index]=$name
         emails[index]=$(jq -r '.oauthAccount.emailAddress // "not logged in"' "$file")
         plans[index]=$(account_plan_label "$file")
-        resets[index]=$(weekly_reset_label "$name" "%a %H:%M")
+        resets[index]=$(weekly_reset_in "$name")
         if [ "$name" = "$active" ]; then
             expiry=$(login_expiry_label "$name" active "%d %b")
         else
@@ -1376,7 +1376,7 @@ list_accounts() {
         printf '%b\n' "${line%"${line##*[! ]}"}"
         # Second line: only the values this account has, under its email.
         details=''
-        [ -z "${resets[index]}" ] || details="weekly ${BLUE}${resets[index]}${NC}"
+        [ -z "${resets[index]}" ] || details="weekly resets in ${BLUE}${resets[index]}${NC}"
         if [ -n "${logins[index]}" ]; then
             [ -z "$details" ] || details="$details  ·  "
             details="${details}login ${login_colors[index]}${logins[index]}${NC}"
@@ -1452,6 +1452,22 @@ weekly_reset_label() {
         | strflocaltime($format)' "$file" 2>/dev/null || :
 }
 
+# Print how long until profile <name>'s next weekly reset, rounded down:
+# "4d 7h" (or "4d" on the hour) from a day out, "7h" from an hour out, else
+# "35m"; nothing when none was recorded.
+weekly_reset_in() {
+    local file="$ACCOUNTS_DIR/$1.weekly"
+    [ -f "$file" ] && [ ! -L "$file" ] || return 0
+    jq -Rr '
+        select(test("^[0-9]{9,11}\\n?\\z")) | rtrimstr("\n") | tonumber
+        | . + ((now - .) / 604800 | if . > 0 then ceil else 0 end) * 604800
+        | (. - now) / 60 | floor | if . < 0 then 0 else . end
+        | if . >= 1440 then
+              "\(. / 1440 | floor)d" + (. % 1440 / 60 | floor | if . > 0 then " \(.)h" else "" end)
+          elif . >= 60 then "\(. / 60 | floor)h"
+          else "\(.)m" end' "$file" 2>/dev/null || :
+}
+
 # Print "<level>\t<when>" for when profile <name>'s login (its refresh token)
 # expires, in this computer's timezone; nothing when unknown. Level is ok, soon
 # (under 7 days left) or expired; <when> is the time in strftime format [format]
@@ -1484,7 +1500,7 @@ show_current() {
     echo -e "Account:    $(current_email)"
     echo -e "Saved as:   ${active:-(not saved)}"
     [ -z "$active" ] || reset=$(weekly_reset_label "$active")
-    [ -z "$reset" ] || echo -e "Weekly:     resets ${reset}"
+    [ -z "$reset" ] || echo -e "Weekly:     resets in $(weekly_reset_in "$active") (${reset})"
     [ -z "$active" ] || expiry=$(login_expiry_label "$active" active)
     if [ -n "$expiry" ]; then
         case "${expiry%%$'\t'*}" in
@@ -1765,7 +1781,7 @@ pick_saved_account() (
         fi
         index=${#names[@]}
         names[index]=$name; plans[index]=$plan; emails[index]=$email; zones[index]=$zone
-        resets[index]=$(weekly_reset_label "$name")
+        resets[index]=$(weekly_reset_in "$name")
         [ "$name" != "$active" ] || selected=$index
     done
     if [ "${#names[@]}" -eq 0 ]; then
