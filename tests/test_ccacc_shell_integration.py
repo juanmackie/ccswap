@@ -80,7 +80,7 @@ class ShellIntegrationTests(unittest.TestCase):
         self.executable("jq", '#!/bin/bash\nprintf "%s\\0" "$@" >> "$JQ_ARGV_LOG"\nexec '
                         + shlex.quote(JQ) + ' "$@"\n')
         self.executable("claude", r'''#!/bin/bash
-command jq -cn --args '{tz:env.TZ, browser:env.BROWSER, config:env.CLAUDE_CONFIG_DIR,
+command jq -cn --args '{tz:env.TZ, cc_tz:env.CC_TZ, browser:env.BROWSER, config:env.CLAUDE_CONFIG_DIR,
     outer:env.OUTER, inner:env.INNER, args:$ARGS.positional}' -- "$@" >> "$LAUNCHES"
 ''')
         self.executable("_op_agent", r'''#!/bin/bash
@@ -203,6 +203,7 @@ apply_surge() { :; }
                                  "claude 'next argument'\n", startup=False)
                 launches = self.records(self.launches)
                 self.assertEqual([entry["tz"] for entry in launches], ["Australia/Sydney", "Asia/Tokyo"])
+                self.assertEqual([entry["cc_tz"] for entry in launches], ["Australia/Sydney", "Asia/Tokyo"])
                 for index, entry in enumerate(launches):
                     self.assertEqual(entry["browser"], "false")
                     self.assertIsNone(entry["config"])
@@ -212,6 +213,7 @@ apply_surge() { :; }
                 self.assertFalse(self.wrappers.exists())
                 self.interactive(shell, "claude 'fresh terminal'\n")
                 self.assertEqual(self.records(self.launches)[-1]["tz"], "Asia/Tokyo")
+                self.assertEqual(self.records(self.launches)[-1]["cc_tz"], "Asia/Tokyo")
 
     def test_nonexported_zdotdir_metadata_for_existing_and_missing_alias(self):
         startup, rcs = self.startup("zsh", "TZ=UTC claude", zdotdir=True)
@@ -605,22 +607,28 @@ apply_surge() { :; }
                         self.assertEqual(self.records(self.launches)[0]["args"], ["/login"])
                         self.assertFalse(self.wrappers.exists())
 
-    def test_previous_owned_v3_hook_requires_explicit_safe_upgrade(self):
-        self.startup("zsh", zdotdir=True)
-        self.cli("configure-shell")
-        hook = self.home / ".ccacc-shell/hook.sh"
-        current = hook.read_bytes()
-        quote = lambda value: "'" + str(value).replace("'", "'\\''") + "'"
-        previous = (ROOT / "tests/fixtures/ccacc_hook_v3_launch_prompt.sh.in").read_text()
-        previous = previous.replace("@SCRIPT@", quote(self.core)).replace("@DIRECTORY@", quote(self.core.parent))
-        hook.write_text(previous)
-        before = self.home_snapshot()
-        self.harness("require_shell_hook", success=False)
-        self.assertEqual(self.home_snapshot(), before)
-        self.cli("configure-shell")
-        self.assertEqual(hook.read_bytes(), current)
-        self.assertFalse(self.launches.exists())
-        self.harness("require_shell_hook")
+    def test_previous_owned_v3_hooks_require_explicit_safe_upgrade(self):
+        # Earlier shipped v3 launchers: the YOLO prompt, then the 1.2.6 launch-mode
+        # getter without CC_TZ. Both are recognised only by an explicit reinstall.
+        for fixture in ("ccacc_hook_v3_launch_prompt.sh.in", "ccacc_hook_v3_launch_mode.sh.in"):
+            with self.subTest(fixture=fixture):
+                self.reset_fixture()
+                self.startup("zsh", zdotdir=True)
+                self.cli("configure-shell")
+                hook = self.home / ".ccacc-shell/hook.sh"
+                current = hook.read_bytes()
+                quote = lambda value: "'" + str(value).replace("'", "'\\''") + "'"
+                previous = (ROOT / "tests/fixtures" / fixture).read_text()
+                previous = previous.replace("@SCRIPT@", quote(self.core)).replace("@DIRECTORY@", quote(self.core.parent))
+                self.assertNotEqual(previous.encode(), current)
+                hook.write_text(previous)
+                before = self.home_snapshot()
+                self.harness("require_shell_hook", success=False)
+                self.assertEqual(self.home_snapshot(), before)
+                self.cli("configure-shell")
+                self.assertEqual(hook.read_bytes(), current)
+                self.assertFalse(self.launches.exists())
+                self.harness("require_shell_hook")
 
     def test_corrupt_legacy_code_is_refused_before_startup_or_writes(self):
         for version in (1, 2):
@@ -667,6 +675,7 @@ apply_surge() { :; }
                              zdotdir=shell == "zsh")
                 self.cli("configure-shell")
                 self.env["TZ"] = "America/New_York"
+                self.env["CC_TZ"] = "America/New_York"
                 self.executable("_op_agent", '#!/bin/bash\nexport TZ=Asia/Tokyo\nexec "$@"\n')
                 self.harness("main new")
                 hook = shlex.quote(str(self.home / ".ccacc-shell/hook.sh"))
@@ -674,6 +683,7 @@ apply_surge() { :; }
                 launched = self.records(self.launches)[0]
                 self.assertEqual(launched["browser"], "false")
                 self.assertIsNone(launched["tz"])
+                self.assertIsNone(launched["cc_tz"])
                 self.assertEqual(launched["args"], ["/login"])
                 self.assertEqual((launched["outer"], launched["inner"]), (None, None))
                 self.assertFalse((self.accounts / ".pending-timezone").exists())

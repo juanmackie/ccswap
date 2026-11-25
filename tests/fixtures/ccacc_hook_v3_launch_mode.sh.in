@@ -1,0 +1,30 @@
+# Managed by ccacc. Fixed native Claude launcher; no copied alias commands.
+__ccacc_bin=@DIRECTORY@
+case ":${PATH-}:" in
+    *:"$__ccacc_bin":*) ;;
+    *) export PATH="$__ccacc_bin${PATH:+:$PATH}" ;;
+esac
+unset __ccacc_bin
+unalias claude 2>/dev/null || :
+function claude { (
+    __ccacc_status=0
+    __ccacc_tz=$(command bash @SCRIPT@ timezone) || __ccacc_status=$?
+    case "$__ccacc_status" in
+        0)
+            case "$__ccacc_tz" in
+                ''|/*|*..*|*[!A-Za-z0-9_+/-]*)
+                    printf '%s\n' 'ccacc: invalid or missing active account timezone' >&2; return 1 ;;
+            esac
+            if [ ! -f "/usr/share/zoneinfo/$__ccacc_tz" ] && [ ! -f "/var/db/timezone/zoneinfo/$__ccacc_tz" ]; then
+                printf '%s\n' 'ccacc: unknown active account timezone' >&2; return 1
+            fi
+            __ccacc_tz_env=("TZ=$__ccacc_tz")
+            ;;
+        3) [ -z "$__ccacc_tz" ] || return 1; __ccacc_tz_env=(-u TZ) ;;
+        *) printf '%s\n' 'ccacc: cannot read the active account timezone; save its timezone before launching Claude' >&2; return 1 ;;
+    esac
+    # The internal getter is read-only and fails closed. Caller argv is opaque.
+    __ccacc_yolo=$(command bash @SCRIPT@ launch-mode 2>/dev/null) || __ccacc_yolo=false
+    if [ "$__ccacc_yolo" = true ]; then set -- --dangerously-skip-permissions "$@"; fi
+    command env "${__ccacc_tz_env[@]}" BROWSER=false claude "$@"
+) }

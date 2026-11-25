@@ -128,15 +128,20 @@ unnamed default. Invalid active metadata returns status `1` and blocks hooked la
 
 On every hooked `claude` launch, the hook reads the current zone and forces
 `BROWSER=false`. Only the child environment changes; the caller's `TZ` and
-`BROWSER` stay unchanged. The hook calls the native `claude` executable on PATH,
-bypassing aliases/functions and copying no old wrappers or fixed flags. It
-forwards caller arguments and exit status, without prompting or reading stdin.
+`BROWSER` stay unchanged. For a named profile the hook also exports its zone as
+`CC_TZ`, so Claude and the tools it starts can read the ccacc timezone as
+`$CC_TZ`; for an unnamed default session `CC_TZ` is unset, like `TZ`. The hook
+calls the native `claude` executable on PATH, bypassing aliases/functions and
+copying no old wrappers or fixed flags. It forwards caller arguments and exit
+status, without prompting or reading stdin.
 
 Only `use` requires a verified installed hook, including when choosing the active
 profile. Save/new do not install, repair or require it, but still require the
 companion's path-safety helpers. Without an activated hook, its launch environment
-guarantees do not apply. Reinstall when the installed pair or managed hook is stale;
-inspect modified/orphaned hook files before following repair instructions.
+guarantees do not apply. Reinstall when the installed pair or managed hook is stale:
+a hook written by ccacc 1.2.6 or earlier (without `CC_TZ`) fails the `use` check
+until reinstalled, and the reinstall recognizes and replaces it. Inspect
+modified/orphaned hook files before following repair instructions.
 
 ## Switching and permissions
 

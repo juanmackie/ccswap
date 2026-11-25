@@ -328,6 +328,7 @@ _ccacc_shell_check_text() {
         if [ "$check_only" != --installed ]; then
             script=$prior_script
             expected=$(_ccacc_shell_legacy_v3_text; printf '.')
+            [ "$_ccacc_content." = "$expected" ] || expected=$(_ccacc_shell_legacy_v3_launch_mode_text; printf '.')
             script=$current_script
             [ "$_ccacc_content." = "$expected" ] && return 0
         fi
@@ -362,7 +363,7 @@ _ccacc_shell_check_text() {
     return 1
 }
 
-# Upgrade-only exact-byte recognition of the previous owned v3 launcher.
+# Upgrade-only exact-byte recognition of the earlier owned v3 launcher (YOLO prompt).
 # Never sourced or emitted as the installed hook.
 _ccacc_shell_legacy_v3_text() {
     local quoted_script
@@ -415,7 +416,9 @@ function claude { (
 HOOK
 }
 
-_ccacc_shell_hook_text() {
+# Upgrade-only exact-byte recognition of the ccacc 1.2.6 v3 launcher (launch-mode
+# getter, no CC_TZ export). Never sourced or emitted as the installed hook.
+_ccacc_shell_legacy_v3_launch_mode_text() {
     local quoted_script
     quoted_script=$(_ccacc_shell_quote "$script")
     cat <<HOOK
@@ -442,6 +445,44 @@ function claude { (
             __ccacc_tz_env=("TZ=\$__ccacc_tz")
             ;;
         3) [ -z "\$__ccacc_tz" ] || return 1; __ccacc_tz_env=(-u TZ) ;;
+        *) printf '%s\\n' 'ccacc: cannot read the active account timezone; save its timezone before launching Claude' >&2; return 1 ;;
+    esac
+    # The internal getter is read-only and fails closed. Caller argv is opaque.
+    __ccacc_yolo=\$(command bash $quoted_script launch-mode 2>/dev/null) || __ccacc_yolo=false
+    if [ "\$__ccacc_yolo" = true ]; then set -- --dangerously-skip-permissions "\$@"; fi
+    command env "\${__ccacc_tz_env[@]}" BROWSER=false claude "\$@"
+) }
+HOOK
+}
+
+_ccacc_shell_hook_text() {
+    local quoted_script
+    quoted_script=$(_ccacc_shell_quote "$script")
+    cat <<HOOK
+# Managed by ccacc. Fixed native Claude launcher; no copied alias commands.
+__ccacc_bin=$(_ccacc_shell_quote "${script%/*}")
+case ":\${PATH-}:" in
+    *:"\$__ccacc_bin":*) ;;
+    *) export PATH="\$__ccacc_bin\${PATH:+:\$PATH}" ;;
+esac
+unset __ccacc_bin
+unalias claude 2>/dev/null || :
+function claude { (
+    __ccacc_status=0
+    __ccacc_tz=\$(command bash $quoted_script timezone) || __ccacc_status=\$?
+    case "\$__ccacc_status" in
+        0)
+            case "\$__ccacc_tz" in
+                ''|/*|*..*|*[!A-Za-z0-9_+/-]*)
+                    printf '%s\\n' 'ccacc: invalid or missing active account timezone' >&2; return 1 ;;
+            esac
+            if [ ! -f "/usr/share/zoneinfo/\$__ccacc_tz" ] && [ ! -f "/var/db/timezone/zoneinfo/\$__ccacc_tz" ]; then
+                printf '%s\\n' 'ccacc: unknown active account timezone' >&2; return 1
+            fi
+            export CC_TZ="\$__ccacc_tz"
+            __ccacc_tz_env=("TZ=\$__ccacc_tz")
+            ;;
+        3) [ -z "\$__ccacc_tz" ] || return 1; unset CC_TZ; __ccacc_tz_env=(-u TZ) ;;
         *) printf '%s\\n' 'ccacc: cannot read the active account timezone; save its timezone before launching Claude' >&2; return 1 ;;
     esac
     # The internal getter is read-only and fails closed. Caller argv is opaque.
